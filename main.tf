@@ -1,5 +1,30 @@
+# Configure the AWS Provider
 provider "aws" {
   region = "us-east-1"
+}
+
+# Generate a new SSH Key Pair
+resource "tls_private_key" "example" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# Create a file with the private key
+resource "local_file" "private_key" {
+  content  = tls_private_key.example.private_key_pem
+  filename = "example.pem"
+  file_permission = "0600"
+}
+
+# Output the public key (for reference)
+output "public_key_openssh" {
+  value = tls_private_key.example.public_key_openssh
+}
+
+# Create an AWS Key Pair from the generated public key
+resource "aws_key_pair" "example" {
+  key_name   = "key-pair-1"
+  public_key = tls_private_key.example.public_key_openssh
 }
 
 # VPC
@@ -165,9 +190,9 @@ resource "aws_security_group" "k3s_sg" {
 
 # Bastion Host
 resource "aws_instance" "bastion" {
-  ami           = "ami-0c55b159cbfafe1f0"  # Amazon Linux 2 AMI (Free Tier eligible)
+  ami           = "ami-06b21ccaeff8cd686"  # Amazon Linux 2 AMI (Free Tier eligible)
   instance_type = "t2.micro"
-  key_name      = var.key_name
+  key_name      = aws_key_pair.example.key_name
 
   vpc_security_group_ids = [aws_security_group.bastion_sg.id]
   subnet_id              = aws_subnet.public_subnet.id
@@ -179,9 +204,9 @@ resource "aws_instance" "bastion" {
 
 # K3s Master Node
 resource "aws_instance" "k3s_master" {
-  ami           = "ami-0c55b159cbfafe1f0"  # Amazon Linux 2 AMI (Free Tier eligible)
+  ami           = "ami-06b21ccaeff8cd686"  # Amazon Linux 2 AMI (Free Tier eligible)
   instance_type = "t2.micro"
-  key_name      = var.key_name
+  key_name      = aws_key_pair.example.key_name
 
   vpc_security_group_ids = [aws_security_group.k3s_sg.id]
   subnet_id              = aws_subnet.private_subnet.id
@@ -198,16 +223,16 @@ resource "aws_instance" "k3s_master" {
 
 # K3s Worker Node
 resource "aws_instance" "k3s_worker" {
-  ami           = "ami-0c55b159cbfafe1f0"  # Amazon Linux 2 AMI (Free Tier eligible)
+  ami           = "ami-06b21ccaeff8cd686"  # Amazon Linux 2 AMI (Free Tier eligible)
   instance_type = "t2.micro"
-  key_name      = var.key_name
+  key_name      = aws_key_pair.example.key_name
 
   vpc_security_group_ids = [aws_security_group.k3s_sg.id]
   subnet_id              = aws_subnet.private_subnet.id
 
   user_data = <<-EOF
               #!/bin/bash
-              curl -sfL https://get.k3s.io | K3S_URL=https://${aws_instance.k3s_master.private_ip}:6443 K3S_TOKEN=${var.k3s_token} sh -
+              curl -sfL https://get.k3s.io | K3S_URL=https://${aws_instance.k3s_master.private_ip}:6443 K3S_TOKEN=$(cat /var/lib/rancher/k3s/server/token) sh -
               EOF
 
   tags = {
@@ -215,7 +240,7 @@ resource "aws_instance" "k3s_worker" {
   }
 }
 
-# Output
+# Outputs
 output "bastion_public_ip" {
   value = aws_instance.bastion.public_ip
 }
